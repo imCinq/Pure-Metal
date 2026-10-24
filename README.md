@@ -39,17 +39,18 @@ Needs Xcode 26 or newer, or its command line tools (the Objective-C bridge is bu
 
 ## Benchmarking
 
-`tools/bench.py` runs one dev client per graphics API, one at a time (`default` is Metal, the others are `vulkan` and `opengl`), and prints the average FPS and the 98th and 99.5th percentile frame times for each. It needs a `run/` world named "New World" and the same toolchain as the build:
+`tools/bench.py` compares graphics APIs on your own Mac:
 
 ```
 python3 -I tools/bench.py <tag> default opengl
 ```
 
-The game window must stay focused and in the world while it runs. Useful environment variables: `BENCH_SECONDS` and `BENCH_WARMUP` (measure and warm-up length, default 25 and 10 s), `BENCH_REPEAT` (runs per API; the median is printed), `BENCH_WALK` (fly forward) and `NO_SODIUM`. Your own vsync, fullscreen, pause-on-focus-loss and graphics API options in `run/options.txt` are restored afterwards. Results depend heavily on the Mac, the world and the render distance, so compare runs on the same machine only.
+Results depend on the Mac, the world and the render distance, so compare runs on the same machine only. Setup, options and a note on Terrain LOD are in [docs/BENCHMARKING.md](docs/BENCHMARKING.md).
 
 ## Docs
 
 - [Design notes](docs/DESIGN.md)
+- [Benchmarking](docs/BENCHMARKING.md)
 - [Changelog](CHANGELOG.md)
 
 ## Issues
