@@ -1,0 +1,8 @@
+accessWidener v2 official
+accessible class net/minecraft/client/gui/components/OptionsList$AbstractEntry
+accessible class net/minecraft/client/gui/components/AbstractSelectionList$Entry
+accessible method net/minecraft/client/gui/components/OptionsList$AbstractEntry <init> ()V
+accessible method net/minecraft/client/gui/components/AbstractSelectionList addEntry (Lnet/minecraft/client/gui/components/AbstractSelectionList$Entry;I)I
+accessible field net/minecraft/client/OptionInstance caption Lnet/minecraft/network/chat/Component;
+mutable field net/minecraft/client/OptionInstance caption Lnet/minecraft/network/chat/Component;
+accessible field net/minecraft/client/Options isApplyingGraphicsPreset Z

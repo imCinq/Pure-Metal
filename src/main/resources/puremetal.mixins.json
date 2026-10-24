@@ -1,0 +1,43 @@
+{
+  "required": true,
+  "package": "io.github.imcinq.puremetal.mixin",
+  "plugin": "io.github.imcinq.puremetal.mixin.PureMetalMixinPlugin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "PreferredGraphicsApiMixin",
+    "MinecraftBenchMixin",
+    "OptionsSaveMixin",
+    "MinecraftStartupMixin",
+    "RenderTargetMixin",
+    "GameRendererMixin",
+    "VideoSettingsScreenMixin",
+    "OptionsSubScreenAccessor",
+    "DebugScreenEntriesMixin",
+    "DebugScreenEntryListMixin",
+    "memory.sodium.ArenaAggregatorMixin",
+    "ui.sodium.AbstractParentWidgetInvoker",
+    "ui.sodium.OptionListWidgetMixin",
+    "diagnostics.TerrainPrepareMixin",
+    "diagnostics.CompiledMeshBoundsMixin",
+    "diagnostics.TerrainDirectDrawMixin",
+    "diagnostics.TerrainIndirectDrawMixin",
+    "diagnostics.sodium.TerrainBatchMixin",
+    "diagnostics.sodium.BuiltMeshBoundsMixin",
+    "diagnostics.sodium.UploadedMeshBoundsMixin",
+    "diagnostics.sodium.StoredMeshBoundsMixin",
+    "perf.PalettedContainerMixin",
+    "perf.TerrainShaderProofMixin",
+    "lod.SectionCompilerMixin",
+    "lod.SectionCompilerResultsMixin",
+    "lod.CompiledSectionMeshMixin",
+    "lod.LevelExtractorMixin",
+    "lod.LodTextureShaderMixin",
+    "lod.sodium.ChunkBuilderMeshingTaskMixin",
+    "lod.sodium.ChunkBuildOutputMixin",
+    "lod.sodium.RenderSectionMixin",
+    "lod.sodium.RenderSectionManagerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

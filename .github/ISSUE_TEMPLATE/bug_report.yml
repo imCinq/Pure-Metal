@@ -1,0 +1,31 @@
+name: Bug report
+description: Something is broken or looks wrong
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Pure Metal version
+      description: The Pure Metal line on the F3 screen shows renderer, GPU and upscaler.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Mac model and macOS version
+    validations:
+      required: true
+  - type: input
+    id: mods
+    attributes:
+      label: Minecraft, Fabric Loader and Sodium versions, other mods
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: latest.log or crash report
+      description: Paste it or attach the file.

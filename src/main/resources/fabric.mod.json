@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "puremetal",
+  "version": "${version}",
+  "name": "Pure Metal",
+  "description": "A native Metal renderer for Minecraft on Apple Silicon Macs. Same visuals as vanilla, rendered through Metal instead of OpenGL. Works with Sodium. Terrain LOD for extra FPS at long render distances, plus optional Render Scale.",
+  "authors": ["imCinq"],
+  "license": "Apache-2.0",
+  "contact": {
+    "homepage": "https://github.com/imCinq/pure-metal",
+    "sources": "https://github.com/imCinq/pure-metal",
+    "issues": "https://github.com/imCinq/pure-metal/issues"
+  },
+  "icon": "assets/puremetal/icon.png",
+  "environment": "client",
+  "entrypoints": { "sodium:config_api_user": ["io.github.imcinq.puremetal.scale.SodiumScaleOptions"] },
+  "accessWidener": "puremetal.accesswidener",
+  "mixins": ["puremetal.mixins.json"],
+  "depends": { "fabricloader": ">=0.19.0", "minecraft": "26.3", "java": ">=25" },
+  "suggests": { "sodium": "*" }
+}

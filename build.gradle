@@ -1,0 +1,149 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+base { archivesName = "pure-metal" }
+
+repositories {
+	// Sodium: its config API at compile time (settings page) and optionally at dev runtime (-Psodium); nothing ships in the jar.
+	exclusiveContent {
+		forRepository { maven { url = "https://api.modrinth.com/maven" } }
+		filter { includeGroup "maven.modrinth" }
+	}
+}
+
+dependencies {
+	compileOnly "maven.modrinth:sodium:mc26.3-0.9.2-fabric"
+	if (project.hasProperty("sodium")) {
+		localRuntime "maven.modrinth:sodium:mc26.3-0.9.2-fabric"
+	}
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+}
+
+// Objective-C bridge to Metal, built with the system clang and shipped inside the jar.
+def nativeSrc = file("src/main/native")
+def nativeOut = layout.buildDirectory.file("native/libpuremetal.dylib")
+tasks.register('buildNative', Exec) {
+	inputs.dir nativeSrc
+	outputs.file nativeOut
+	doFirst { nativeOut.get().asFile.parentFile.mkdirs() }
+	commandLine 'clang', '-dynamiclib', '-fobjc-arc', '-O2', '-arch', 'arm64', '-install_name', '@rpath/libpuremetal.dylib',
+		'-mmacosx-version-min=14.0', '-Wall', '-Werror',
+		'-framework', 'Metal', '-framework', 'MetalFX', '-framework', 'QuartzCore', '-framework', 'Foundation', '-framework', 'AppKit',
+		'-o', nativeOut.get().asFile.absolutePath,
+		"${nativeSrc}/puremetal.m"
+}
+
+processResources {
+	dependsOn 'buildNative'
+	from(nativeOut) { into 'natives' }
+	def version = project.version
+	inputs.property "version", version
+	filesMatching("fabric.mod.json") { expand "version": version }
+}
+
+// Fails the build when a personal home path or user name is in a tracked text file or in the files that go into the jar.
+// The user name is read from the machine running the build, so no name is written in this file.
+tasks.register('checkPrivacy') {
+	dependsOn 'processResources'
+	def root = projectDir
+	def resourcesDir = layout.buildDirectory.dir("resources/main")
+	def userName = System.getProperty("user.name")
+	def patterns = [
+		~("/Us" + "ers/[^\\s]"),
+		~("/ho" + "me/[^\\s]"),
+		~("C:" + "\\\\Us" + "ers\\\\"),
+	]
+	if (userName && userName.length() >= 3) patterns << ~("(?i)(?<![\\p{Alnum}_])" + java.util.regex.Pattern.quote(userName) + "(?![\\p{Alnum}_])")
+	doLast {
+		def leaks = []
+		def scan = { String label, String text ->
+			text.eachLine { line, n ->
+				if (patterns.any { it.matcher(line).find() }) leaks << "${label}:${n + 1}"
+			}
+		}
+		def tracked = null
+		try {
+			def proc = ["git", "ls-files", "-z"].execute(null, root)
+			def out = proc.text
+			if (proc.waitFor() == 0) tracked = out.split("\u0000").findAll { it }
+		} catch (IOException ignored) {}
+		if (tracked == null) {
+			// No git (or not a checkout): scan the source tree directly instead of silently skipping.
+			def skip = ["build", ".gradle", "run", ".git"] as Set
+			tracked = []
+			root.eachFileRecurse { f ->
+				def rel = root.toPath().relativize(f.toPath()).toString()
+				if (f.isFile() && !skip.contains(rel.split("/")[0])) tracked << rel
+			}
+		}
+		tracked.each { path ->
+			def f = new File(root, path)
+			if (!f.isFile()) return
+			def bytes = f.bytes
+			if ((0..<Math.min(bytes.length, 8000)).any { bytes[it] == 0 }) return
+			scan(path, new String(bytes, "UTF-8"))
+		}
+		def res = resourcesDir.get().asFile
+		if (res.isDirectory()) {
+			res.eachFileRecurse { f ->
+				if (f.isFile()) scan("jar:" + res.toPath().relativize(f.toPath()), new String(f.bytes, "ISO-8859-1"))
+			}
+		}
+		if (leaks) throw new GradleException("Personal path or user name found (privacy check):\n  " + leaks.join("\n  "))
+	}
+}
+tasks.named('jar') {
+	dependsOn 'checkPrivacy'
+	from(layout.projectDirectory.files('LICENSE', 'NOTICE'))
+}
+
+tasks.withType(JavaCompile).configureEach { it.options.release = 25 }
+
+java {
+	toolchain { languageVersion = JavaLanguageVersion.of(25) }
+}
+
+// -PjfrDelay / -PjfrDuration go straight into a JVM flag, so anything but a positive whole number of seconds fails the configuration.
+def positiveSeconds(String name, String fallback) {
+	def raw = project.hasProperty(name) ? project.property(name).toString() : fallback
+	if (!(raw ==~ /[0-9]{1,9}/) || raw.toInteger() <= 0) {
+		throw new GradleException("-P${name} must be a positive whole number of seconds (for example -P${name}=${fallback}), got '${raw}'")
+	}
+	return raw
+}
+
+loom {
+	accessWidenerPath = file("src/main/resources/puremetal.accesswidener")
+	runs {
+		client {
+			vmArgs "--enable-native-access=ALL-UNNAMED"
+			if (project.hasProperty("vanilla")) vmArgs "-Dpuremetal.disable=true"
+			if (project.hasProperty("debug")) vmArgs "-Dpuremetal.debug=true"
+			if (project.hasProperty("dumpShaders")) vmArgs "-Dpuremetal.dumpShaders=true"
+			if (project.hasProperty("world")) programArgs "--quickPlaySingleplayer", project.property("world")
+			if (project.hasProperty("bench")) vmArgs "-Dpuremetal.bench=" + project.property("bench")
+			if (project.hasProperty("benchWarmup")) vmArgs "-Dpuremetal.benchWarmup=" + project.property("benchWarmup")
+			if (project.hasProperty("benchCommand")) vmArgs "-Dpuremetal.benchCommand=" + project.property("benchCommand")
+			if (project.hasProperty("benchWalk")) vmArgs "-Dpuremetal.benchWalk=true"
+			if (project.hasProperty("benchShot")) vmArgs "-Dpuremetal.benchShot=" + project.property("benchShot")
+			if (project.hasProperty("benchScales")) vmArgs "-Dpuremetal.benchScales=" + project.property("benchScales")
+			if (project.hasProperty("benchGraphics")) vmArgs "-Dpuremetal.benchGraphics=" + project.property("benchGraphics")
+			if (project.hasProperty("benchAB")) vmArgs "-Dpuremetal.benchAB=" + project.property("benchAB")
+			if (project.hasProperty("submitsInFlight")) vmArgs "-Dpuremetal.submitsInFlight=" + project.property("submitsInFlight")
+			if (project.hasProperty("noPresent")) vmArgs "-Dpuremetal.noPresent=true"
+			if (project.hasProperty("jfr")) vmArgs "-XX:StartFlightRecording=settings=profile,delay=" + positiveSeconds("jfrDelay", "15") + "s,duration=" + positiveSeconds("jfrDuration", "25") + "s,filename=" + file("build/play.jfr").absolutePath
+			if (project.hasProperty("profile")) vmArgs "-Dpuremetal.profile=true"
+			if (project.hasProperty("metal4")) vmArgs "-Dpuremetal.metal4=" + project.property("metal4")
+			if (project.hasProperty("terrainDiagnostics")) vmArgs "-Dpuremetal.terrainDiagnostics=true"
+			if (project.hasProperty("terrainOcclusionProbe")) vmArgs "-Dpuremetal.terrainOcclusionProbe=true", "-Dpuremetal.terrainDiagnostics=true", "-Dpuremetal.profile=true"
+			if (project.hasProperty("disableLodTextures")) vmArgs "-Dpuremetal.experimentalLodTextures=false"
+			if (project.hasProperty("capture")) vmArgs "-Dpuremetal.capture=" + project.property("capture")
+			if (project.hasProperty("validate")) {
+				environmentVariable "MTL_DEBUG_LAYER", "1"
+				environmentVariable "MTL_DEBUG_LAYER_ERROR_MODE", "nslog"
+			}
+		}
+	}
+}
