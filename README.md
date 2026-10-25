@@ -7,7 +7,7 @@ A native Metal renderer for Minecraft on Apple Silicon Macs. Same visuals as van
 - Experimental Metal 4 mode (macOS 26+)
 - A Pure Metal line on the F3 screen for bug reports
 
-![Before and after](docs/gallery/1-before-after.png)
+![Before and after](docs/gallery/1-before-after.webp)
 
 ## Requirements
 
@@ -38,6 +38,8 @@ Download the jar from the releases page and put it in your `mods` folder. Leave 
 Needs Xcode 26 or newer, or its command line tools (the Objective-C bridge is built with the system `clang` against the macOS 26 SDK; the result still runs on macOS 14+) and a Java 25 toolchain. The jar ends up in `build/libs`.
 
 ## Benchmarking
+
+![Benchmarks](docs/gallery/2-benchmarks.webp)
 
 `tools/bench.py` compares graphics APIs on your own Mac:
 
