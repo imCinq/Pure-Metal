@@ -2,6 +2,7 @@ package io.github.imcinq.puremetal.mixin;
 
 import io.github.imcinq.puremetal.Lang;
 import io.github.imcinq.puremetal.lod.LodOptions;
+import io.github.imcinq.puremetal.perf.GenerationCapOptions;
 import io.github.imcinq.puremetal.scale.NoteEntry;
 import io.github.imcinq.puremetal.scale.ScaleOptions;
 import net.minecraft.client.gui.components.FocusableTextWidget;
@@ -30,5 +31,6 @@ public abstract class VideoSettingsScreenMixin {
         list.addEntry(entry, entry.rowHeight());
         list.addSmall(ScaleOptions.vanilla());
         list.addSmall(LodOptions.vanilla());
+        list.addSmall(GenerationCapOptions.vanilla());
     }
 }

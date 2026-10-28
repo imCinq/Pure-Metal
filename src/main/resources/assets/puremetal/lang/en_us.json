@@ -24,5 +24,7 @@
   "puremetal.options.terrainLod": "Terrain LOD",
   "puremetal.options.terrainLod.tooltip": "Simplifies far terrain at Render Distance 16+. Nearby terrain stays full detail; distant solid blocks are drawn as bigger blocks. Water, plants, leaves and glass are unchanged.",
   "puremetal.options.terrainLodRatio": "LOD Distance",
-  "puremetal.options.terrainLodRatio.tooltip": "Share of Render Distance kept at full detail. Lower simplifies more terrain."
+  "puremetal.options.terrainLodRatio.tooltip": "Share of Render Distance kept at full detail. Lower simplifies more terrain.",
+  "puremetal.options.generationFpsCap": "Faster World Generation",
+  "puremetal.options.generationFpsCap.tooltip": "In singleplayer, while new terrain generates, limits FPS to twice your display's refresh rate (at most 259). The freed CPU time generates chunks faster. Normal FPS returns about 2 seconds after generation stops."
 }

@@ -6,6 +6,8 @@ import io.github.imcinq.puremetal.Lang;
 import io.github.imcinq.puremetal.lod.LodOptions;
 import io.github.imcinq.puremetal.backend.Metal4Config;
 import io.github.imcinq.puremetal.lod.TerrainLodConfig;
+import io.github.imcinq.puremetal.perf.GenerationCapOptions;
+import io.github.imcinq.puremetal.perf.GenerationFpsCap;
 import net.caffeinemc.mods.sodium.api.config.option.OptionFlag;
 import net.caffeinemc.mods.sodium.api.config.option.OptionImpact;
 import net.caffeinemc.mods.sodium.api.config.structure.BooleanOptionBuilder;
@@ -41,7 +43,16 @@ public final class SodiumScaleOptions implements ConfigEntryPoint {
                         .setStorageHandler(() -> {
                         })
                         .setBinding(ScaleConfig::setUpscaler, ScaleConfig::upscaler))
-                    .addOption(metal4Option(builder))))
+                    .addOption(metal4Option(builder)))
+                .addOptionGroup(builder.createOptionGroup()
+                    .addOption(builder.createBooleanOption(id("generation_fps_cap"))
+                        .setName(GenerationCapOptions.name())
+                        .setTooltip(GenerationCapOptions.tooltip())
+                        .setImpact(OptionImpact.LOW)
+                        .setDefaultValue(false)
+                        .setStorageHandler(() -> {
+                        })
+                        .setBinding(GenerationFpsCap::setEnabled, GenerationFpsCap::enabled))))
             .addPage(builder.createOptionPage()
                 .setName(Lang.text("puremetal.options.lodPage"))
                 .addOptionGroup(builder.createOptionGroup()
