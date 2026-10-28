@@ -214,7 +214,7 @@ can be concluded from this pair. Do not use it as a release performance claim.
 
 Artifacts: `build/combined-fluid-lod-ab-20261026-175413/`, including `launch.json`,
 both JFRs/logs, `comparison-raw.txt`, `comparison-inactivity-excluded.txt` and
-`focus-timeline.txt`. Analyzer: `build/AnalyzeCombinedFluidLod.java`; runner:
+`focus-timeline.txt`. Analyzer: `build/AnalyzeCombinedFluidLod.java`; driver script:
 `build/combined_fluid_lod_ab.py`. Options, config and world were hash-verified
 restored after each capture. Production source hashes and the pre-existing tracked
 diff were unchanged; production classes were restored and no test client remained.
@@ -273,5 +273,5 @@ specific cause remains unknown.
 
 Diagnosis artifacts in the comparison folder: `diagnosis-actual-fluid-*.log`,
 `diagnosis-native-timing.txt`, and `diagnosis-gpu-cpu.txt`. Fixture source:
-`build/TestActualFluidCost.java`, runner: `build/run_actual_fluid_cost.py`.
+`build/TestActualFluidCost.java`, driver script: `build/run_actual_fluid_cost.py`.
 Production code was not modified during the diagnosis.
