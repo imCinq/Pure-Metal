@@ -4,6 +4,7 @@ import com.mojang.renderpearl.api.device.GpuSurface;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.mojang.renderpearl.backend.api.CommandEncoderBackend;
 import com.mojang.renderpearl.backend.api.GpuSurfaceBackend;
+import io.github.imcinq.puremetal.bench.PresentationProfile;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
@@ -25,9 +26,11 @@ final class MetalSurface implements GpuSurfaceBackend {
     /** Dev aid: -Dpuremetal.noPresent=true renders frames without showing them, to isolate presentation costs. */
     private static final boolean NO_PRESENT = Boolean.getBoolean("puremetal.noPresent");
     private int frame;
-    private static final boolean PRESENT_STATS = Debug.ENABLED || io.github.imcinq.puremetal.bench.Bench.SECONDS > 0;
+    private static final boolean PRESENT_STATS = Debug.ENABLED || io.github.imcinq.puremetal.bench.Bench.SECONDS > 0 || PresentationProfile.ENABLED;
     private long statsStart;
     private int statsFrames;
+    private int configuredWidth, configuredHeight;
+    private boolean configuredVsync;
 
     MetalSurface(final MetalDevice device, final long windowHandle) {
         this.device = device;
@@ -49,9 +52,20 @@ final class MetalSurface implements GpuSurfaceBackend {
     @Override
     public void configure(final GpuSurface.Configuration config) {
         boolean vsync = config.presentMode() == GpuSurface.PresentMode.FIFO || config.presentMode() == GpuSurface.PresentMode.FIFO_RELAXED;
-        FrameTrace.mark(FrameTrace.CFG_ENTER, 0);
+        this.configuredWidth = config.width();
+        this.configuredHeight = config.height();
+        this.configuredVsync = vsync;
+        PresentationProfile.Configuration event = PresentationProfile.ENABLED ? new PresentationProfile.Configuration() : null;
+        if (event != null) {
+            event.width = config.width();
+            event.height = config.height();
+            event.vsync = vsync;
+            event.begin();
+        }
+        FrameTrace.mark(FrameTrace.CFG_ENTER, config.width(), config.height(), vsync ? 1L : 0L);
         MetalNative.surfaceConfigure(this.surface, config.width(), config.height(), vsync ? 1 : 0, ALLOW_TEARING ? 1 : 0);
         FrameTrace.mark(FrameTrace.CFG_EXIT, 0);
+        if (event != null) event.commit();
     }
 
     @Override
@@ -94,11 +108,40 @@ final class MetalSurface implements GpuSurfaceBackend {
             MetalNative.surfaceTakeStats(this.surface, MemoryUtil.memAddress(st));
             double secs = (now - this.statsStart) / 1e9;
             long shown = st.get(3);
+            long drawableWaitMax = FrameTrace.ENABLED ? MetalNative.takeStat(this.device.handle(), 38) : 0L;
+            long layerConfigureMax = FrameTrace.ENABLED ? MetalNative.takeStat(this.device.handle(), 39) : 0L;
+            if (PresentationProfile.ENABLED) {
+                PresentationProfile event = new PresentationProfile();
+                if (event.isEnabled()) {
+                    event.intervalNs = now - this.statsStart;
+                    event.width = this.configuredWidth;
+                    event.height = this.configuredHeight;
+                    event.vsync = this.configuredVsync;
+                    event.focused = net.minecraft.client.Minecraft.getInstance().isWindowActive();
+                    event.nativeTimingEnabled = FrameTrace.ENABLED;
+                    event.rendered = this.statsFrames;
+                    event.skipped = st.get(0);
+                    event.slotsBusy = st.get(1);
+                    event.presented = st.get(2);
+                    event.shown = shown;
+                    event.submitToShownSumNs = st.get(4) * 1000L;
+                    event.drawableWaitMaxNs = drawableWaitMax;
+                    event.layerConfigureMaxNs = layerConfigureMax;
+                    event.commit();
+                }
+            }
             org.slf4j.LoggerFactory.getLogger(MetalSurface.class).info(
                 "PRESENT rendered/s={} presented/s={} shown/s={} noDrawable/s={} slotsBusy/s={} presentToShownMs={}",
                 Math.round(this.statsFrames / secs), Math.round(st.get(2) / secs), Math.round(shown / secs),
                 Math.round(st.get(0) / secs), Math.round(st.get(1) / secs), shown == 0 ? "n/a" : String.format("%.1f", st.get(4) / 1000.0 / shown)
             );
+            if (FrameTrace.ENABLED) {
+                org.slf4j.LoggerFactory.getLogger(MetalSurface.class).info(
+                    "PRESENT-TIMING drawableWaitMaxMs={} layerConfigureMaxMs={} size={}x{} vsync={}",
+                    String.format("%.2f", drawableWaitMax / 1e6), String.format("%.2f", layerConfigureMax / 1e6),
+                    this.configuredWidth, this.configuredHeight, this.configuredVsync
+                );
+            }
         }
         this.statsStart = now;
         this.statsFrames = 0;

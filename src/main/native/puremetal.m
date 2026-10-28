@@ -30,6 +30,11 @@ static uint64_t pm_ticks_ns(uint64_t ticks) {
     return g_tb.denom ? ticks * g_tb.numer / g_tb.denom : 0;
 }
 static uint64_t pm_sec_ns(double sec) { return sec > 0 ? (uint64_t)(sec * 1e9) : 0; }
+static void pm_atomic_max(_Atomic uint64_t *counter, uint64_t value) {
+    uint64_t previous = atomic_load_explicit(counter, memory_order_relaxed);
+    while (previous < value && !atomic_compare_exchange_weak_explicit(counter, &previous, value,
+            memory_order_relaxed, memory_order_relaxed)) { }
+}
 static inline void trace_ev(int type, int64_t a, int64_t b, int64_t c) {
     if (!atomic_load_explicit(&g_traceOn, memory_order_relaxed)) return;
     pthread_mutex_lock(&g_traceLock);
@@ -408,6 +413,8 @@ typedef struct PMDevice {
     // PUREMETAL_DEPTH_CLEAR_FOLD=0 disables it.
     bool foldDepthClears;
     void *depthClearLibrary, *depthClearPipeline, *depthClearState;
+    void *partialDepthLibrary, *partialDepthPipeline, *partialDepthState;
+    MTLPixelFormat partialDepthFormat;
     MTLPixelFormat depthClearFormats[PM_MAX_COLOR];
     MTLPixelFormat presentFormat;
     // Render scale: the world drawn smaller is upscaled into the full-size target (pm_upscale).
@@ -553,6 +560,7 @@ typedef struct PMDevice {
     // 29..34. Then the time blocked in the surface's vsyncDepth/slotsFree semaphore waits and how many of those waits blocked: 35, 36.
     _Atomic uint64_t encCounts[6];
     _Atomic uint64_t surfaceWaitNs, surfaceWaitCount; // blocked only: the uncontended attempt is not counted
+    _Atomic uint64_t drawableWaitMaxNs, layerConfigureMaxNs; // frame-trace only; consumed once per reporting interval
     // pm_release deferrals (a Metal 4 command buffer does not retain what it uses) and how many handles of each tracked allocation exist.
     pthread_mutex_t m4Lock;
     CFMutableDictionaryRef m4Tracked;
@@ -2941,6 +2949,8 @@ PM_EXPORT uint64_t pm_take_stat(PMDevice *d, int which) {
     if (which == 35) return atomic_exchange(&d->surfaceWaitNs, 0);
     if (which == 36) return atomic_exchange(&d->surfaceWaitCount, 0);
     if (which == 37) return atomic_exchange(&d->m4TsDropped, 0);
+    if (which == 38) return atomic_exchange(&d->drawableWaitMaxNs, 0);
+    if (which == 39) return atomic_exchange(&d->layerConfigureMaxNs, 0);
     if (which >= 12) return atomic_exchange(&d->txDiagStats[which - 12], 0);
     uint64_t v = d->stats[which];
     d->stats[which] = 0;
@@ -3049,6 +3059,9 @@ PM_EXPORT void pm_device_destroy(PMDevice *d) {
         pm_release(d->depthClearLibrary);
         pm_release(d->depthClearPipeline);
         pm_release(d->depthClearState);
+        pm_release(d->partialDepthLibrary);
+        pm_release(d->partialDepthPipeline);
+        pm_release(d->partialDepthState);
         pm_release(d->upscalePipeline);
         pm_release(d->upscaleSampler);
         pm_release(d->fxScaler);
@@ -3550,6 +3563,97 @@ static bool fold_depth_clear(PMDevice *d, void **colors, void *depth, double val
     return true;
 }
 
+// Clear a depth rectangle with a depth-only triangle. Stencil is loaded and preserved.
+static bool partial_depth_clear(PMDevice *d, void *depth, double value, int width, int height,
+                                int x, int y, int w, int h) {
+    if (!isfinite(value)) return false;
+    value = fmin(fmax(value, 0.0), 1.0);
+    id<MTLTexture> t = PM_OBJ(id<MTLTexture>, depth);
+    if (!is_depth_format(t.pixelFormat)
+            || (t.textureType != MTLTextureType2D && t.textureType != MTLTextureTypeCube) || t.sampleCount != 1) return false;
+    // The pass size comes from the caller; the rectangle must also fit this attachment.
+    if ((NSUInteger)x + (NSUInteger)w > t.width || (NSUInteger)y + (NSUInteger)h > t.height) return false;
+    NSError *error = nil;
+    if (!d->partialDepthLibrary) {
+        NSString *source = @"#include <metal_stdlib>\nusing namespace metal;\n"
+            "vertex float4 pm_partial_depth(uint i [[vertex_id]], constant float &z [[buffer(0)]]) {"
+            "float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return float4(p[i],z,1);}";
+        id<MTLLibrary> lib = pm_new_library(d, source, nil, &error);
+        if (!lib) return false;
+        d->partialDepthLibrary = pm_retain(lib);
+        MTLDepthStencilDescriptor *ds = [MTLDepthStencilDescriptor new];
+        ds.depthCompareFunction = MTLCompareFunctionAlways;
+        ds.depthWriteEnabled = YES;
+        d->partialDepthState = pm_retain([DEV_MTL(d) newDepthStencilStateWithDescriptor:ds]);
+    }
+    if (!d->partialDepthState) return false;
+    if (!d->partialDepthPipeline || d->partialDepthFormat != t.pixelFormat) {
+        MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+        pd.vertexFunction = [PM_OBJ(id<MTLLibrary>, d->partialDepthLibrary) newFunctionWithName:@"pm_partial_depth"];
+        pd.depthAttachmentPixelFormat = t.pixelFormat;
+        if (t.pixelFormat == MTLPixelFormatDepth32Float_Stencil8) pd.stencilAttachmentPixelFormat = t.pixelFormat;
+        id<MTLRenderPipelineState> pipeline = [DEV_MTL(d) newRenderPipelineStateWithDescriptor:pd error:&error];
+        if (!pipeline) return false;
+        pm_release(d->partialDepthPipeline);
+        d->partialDepthPipeline = pm_retain(pipeline);
+        d->partialDepthFormat = t.pixelFormat;
+    }
+    id<MTLCommandBuffer> cb = current_cb(d);
+    MTLRenderPassDescriptor *rp = new_pass_descriptor(d);
+    rp.depthAttachment.texture = t;
+    rp.depthAttachment.loadAction = MTLLoadActionLoad;
+    rp.depthAttachment.storeAction = MTLStoreActionStore;
+    if (t.pixelFormat == MTLPixelFormatDepth32Float_Stencil8) {
+        rp.stencilAttachment.texture = t;
+        rp.stencilAttachment.loadAction = MTLLoadActionLoad;
+        rp.stencilAttachment.storeAction = MTLStoreActionStore;
+    }
+    id<MTLRenderCommandEncoder> enc = new_render_encoder_kind(d, cb, rp, 1, "partial depth clear");
+    if (!enc) return false;
+    [enc setRenderPipelineState:PM_OBJ(id<MTLRenderPipelineState>, d->partialDepthPipeline)];
+    [enc setDepthStencilState:PM_OBJ(id<MTLDepthStencilState>, d->partialDepthState)];
+    [enc setViewport:(MTLViewport){0, 0, (double)width, (double)height, 0, 1}];
+    [enc setScissorRect:(MTLScissorRect){(NSUInteger)x, (NSUInteger)y, (NSUInteger)w, (NSUInteger)h}];
+    float z = (float)value;
+    bind_bytes(d, enc, PM_STAGE_VERTEX, &z, sizeof(z), 0);
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    [enc endEncoding];
+    return true;
+}
+
+// Metal attachment clears ignore the render area. Clear a temporary texture in the attachment's own
+// format, then copy only the requested rectangle. This preserves Metal's format conversion rules.
+static bool partial_color_clear(PMDevice *d, void *destination, const float *color, int x, int y, int w, int h) {
+    id<MTLTexture> target = PM_OBJ(id<MTLTexture>, destination);
+    if ((target.textureType != MTLTextureType2D && target.textureType != MTLTextureTypeCube) || target.sampleCount != 1) return false;
+    if ((NSUInteger)x + (NSUInteger)w > target.width || (NSUInteger)y + (NSUInteger)h > target.height) return false;
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:target.pixelFormat
+                                                                                  width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
+    td.storageMode = MTLStorageModePrivate;
+    td.usage = MTLTextureUsageRenderTarget;
+    void *temporary = pm_retain([DEV_MTL(d) newTextureWithDescriptor:td]);
+    if (!temporary) return false;
+    id<MTLCommandBuffer> cb = current_cb(d);
+    MTLRenderPassDescriptor *rp = new_pass_descriptor(d);
+    rp.colorAttachments[0].texture = PM_OBJ(id<MTLTexture>, temporary);
+    rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.colorAttachments[0].clearColor = MTLClearColorMake(color[0], color[1], color[2], color[3]);
+    id<MTLRenderCommandEncoder> enc = new_render_encoder_kind(d, cb, rp, 1, "partial color clear");
+    if (!enc) { pm_release(temporary); return false; }
+    [enc endEncoding];
+    id<MTLBlitCommandEncoder> blit = blit_encoder(d, 3);
+    if (!blit) { pm_release(temporary); return false; }
+    PM_IF_M4(d) m4_blit_deps(d, &d->blitHaz, (id<MTL4ComputeCommandEncoder>)blit,
+                             tex_key_ptr(temporary), tex_key_ptr(destination), true);
+    [blit copyFromTexture:PM_OBJ(id<MTLTexture>, temporary) sourceSlice:0 sourceLevel:0
+             sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake((NSUInteger)w, (NSUInteger)h, 1)
+                toTexture:target destinationSlice:0 destinationLevel:0 destinationOrigin:MTLOriginMake((NSUInteger)x, (NSUInteger)y, 0)];
+    pm_release(temporary);
+    end_blit(d);
+    return !atomic_load(&d->failed);
+}
+
 static void diag_split_pass(PMDevice *d, const char *label, int width, int height, bool depth);
 
 // colorLoad: 0 load, 1 clear, -1 unused attachment. depthLoad likewise, depthTex may be NULL.
@@ -3559,6 +3663,36 @@ PM_EXPORT int pm_pass_begin(PMDevice *d, int colorCount, void **colors, const in
     PM_ENC_SCOPE(PM_ENC_PASS);
     @autoreleasepool {
         end_blit(d);
+        bool partial = sx != 0 || sy != 0 || sw != width || sh != height;
+        bool hasClear = depth && depthLoad == 1;
+        int loads[PM_MAX_COLOR];
+        for (int i = 0; i < colorCount && i < PM_MAX_COLOR; i++) hasClear |= colors[i] && colorLoad[i] == 1;
+        if (partial && hasClear) {
+            if (sx < 0 || sy < 0 || sw < 0 || sh < 0 || sx > width || sy > height
+                    || sw > width - sx || sh > height - sy) return 0;
+            // Preserve earlier contents, deferred clears and parked passes before touching individual attachments.
+            current_cb(d);
+            if (colorCount > PM_MAX_COLOR) return 0;
+            // An attachment whose partial clear is declined keeps its clear load action (a whole-attachment clear).
+            bool fellBack = false;
+            for (int i = 0; i < colorCount; i++) {
+                loads[i] = colorLoad[i];
+                if (colors[i] && loads[i] == 1) {
+                    if (sw && sh && !partial_color_clear(d, colors[i], clearColors + i * 4, sx, sy, sw, sh)) { fellBack = true; continue; }
+                    loads[i] = 0;
+                }
+            }
+            if (depth && depthLoad == 1) {
+                if (sw && sh && !partial_depth_clear(d, depth, clearDepth, width, height, sx, sy, sw, sh)) fellBack = true;
+                else depthLoad = 0;
+            }
+            if (fellBack) {
+                static atomic_flag loggedFallback = ATOMIC_FLAG_INIT;
+                if (!atomic_flag_test_and_set(&loggedFallback))
+                    NSLog(@"Pure Metal: a partial render-area clear was declined; clearing the whole attachment instead (further cases are not logged)");
+            }
+            colorLoad = loads;
+        }
         if (d->txSpan) diag_split_pass(d, label, width, height, depth != NULL);
         void *usedColors[PM_MAX_COLOR] = { 0 };
         int clears = depth && depthLoad == 1;
@@ -3686,7 +3820,9 @@ PM_EXPORT int pm_pass_begin(PMDevice *d, int colorCount, void **colors, const in
             rp.depthAttachment.texture = dt;
             rp.depthAttachment.loadAction = (depthLoad == 1 || foldDepth) ? MTLLoadActionClear : MTLLoadActionLoad;
             rp.depthAttachment.storeAction = MTLStoreActionUnknown;
-            rp.depthAttachment.clearDepth = foldDepth ? foldDepthValue : clearDepth;
+            // Metal requires a finite clear depth in [0, 1], even with a Load action. NaN clears to the far plane.
+            double descriptorDepth = foldDepth ? foldDepthValue : clearDepth;
+            rp.depthAttachment.clearDepth = isfinite(descriptorDepth) ? fmin(fmax(descriptorDepth, 0.0), 1.0) : 1.0;
             if (dt.pixelFormat == MTLPixelFormatDepth32Float_Stencil8) {
                 rp.stencilAttachment.texture = dt;
                 rp.stencilAttachment.loadAction = foldDepth ? MTLLoadActionClear : MTLLoadActionLoad;
@@ -5049,8 +5185,11 @@ static void apply_layer_config(PMSurface *s) {
     pthread_mutex_unlock(&s->cfgLock);
     if (!pending) return;
     CAMetalLayer *l = PM_OBJ(CAMetalLayer *, s->layer);
+    bool timing = atomic_load_explicit(&g_traceOn, memory_order_relaxed);
+    uint64_t start = timing ? pm_now_ns() : 0;
     l.drawableSize = CGSizeMake(width, height);
     l.displaySyncEnabled = displaySync ? YES : NO;
+    if (timing) pm_atomic_max(&s->device->layerConfigureMaxNs, pm_now_ns() - start);
 }
 
 PM_EXPORT void pm_surface_configure(PMSurface *s, int width, int height, int vsync, int allowTearing) {
@@ -5221,7 +5360,10 @@ static void draw_and_present(PMSurface *s, int slot, int holdsShown) {
         CAMetalLayer *l = PM_OBJ(CAMetalLayer *, s->layer);
         trace_ev(7, slot, 0, 0);
         if (!atomic_load(&s->shutdown)) apply_layer_config(s);
+        bool timing = atomic_load_explicit(&g_traceOn, memory_order_relaxed);
+        uint64_t drawableStart = timing ? pm_now_ns() : 0;
         id<CAMetalDrawable> drawable = atomic_load(&s->shutdown) ? nil : [l nextDrawable];
+        if (timing) pm_atomic_max(&s->device->drawableWaitMaxNs, pm_now_ns() - drawableStart);
         trace_ev(8, slot, 0, 0);
         if (!drawable) {
             release_slot(s, slot);

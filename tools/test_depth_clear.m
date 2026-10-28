@@ -43,7 +43,7 @@ int main(void) { @autoreleasepool {
         if (mode==5) pm_clear_texture(d,(__bridge void *)other,0,0,0,1,-1);
         if (mode==7) pm_copy_texture_to_buffer(d,colors[0],0,0,0,0,4,4,buffer,0,16);
         load=mode==4?1:0; int width=mode==6?2:4;
-        assert(pm_pass_begin(d,1,colors,&load,red,(__bridge void *)depth,mode==1?0:1,clear,width,4,1,1,1,1,NULL));
+        assert(pm_pass_begin(d,1,colors,&load,red,(__bridge void *)depth,mode==1?0:1,clear,width,4,0,0,width,4,NULL));
         uint64_t passes=pm_take_stat(d,0);
         // Separate encode_clear passes are not counted by the ordinary-pass statistic.
         assert(passes==((enabled && mode<4)?1:2));

@@ -52,8 +52,8 @@ final class MetalRenderPass implements RenderPassBackend {
     private record TexelViewKey(MetalBuffer buffer, long offset, long length, int format) {
     }
 
-    /** One view per buffer slice/format in this pass; released at pass end (the command buffer keeps them alive). */
-    private final Map<TexelViewKey, Long> texelViews = new HashMap<>();
+    /** Created on first use; views are released at pass end (the command buffer keeps them alive). */
+    private @Nullable Map<TexelViewKey, Long> texelViews;
     // Native scratch for binding flushes, reused for the life of the pass.
     private final long scratch = MemoryUtil.nmemAlloc(MAX_BINDINGS * (4 + 4 + 8 + 8));
     private final long kinds = this.scratch;
@@ -74,10 +74,12 @@ final class MetalRenderPass implements RenderPassBackend {
         while (this.debugGroups > 0) {
             this.popDebugGroup();
         }
-        for (long view : this.texelViews.values()) {
-            MetalNative.release(view);
+        if (this.texelViews != null) {
+            for (long view : this.texelViews.values()) {
+                MetalNative.release(view);
+            }
+            this.texelViews.clear();
         }
-        this.texelViews.clear();
         MemoryUtil.nmemFree(this.scratch);
     }
 
@@ -218,7 +220,12 @@ final class MetalRenderPass implements RenderPassBackend {
                     var format = p.uniforms().get(i).gpuFormat();
                     MetalBuffer buffer = ((MetalBuffer)slice.buffer()).use();
                     TexelViewKey key = new TexelViewKey(buffer, slice.offset(), slice.length(), MetalConst.format(format));
-                    Long cached = this.texelViews.get(key);
+                    Map<TexelViewKey, Long> views = this.texelViews;
+                    if (views == null) {
+                        views = new HashMap<>();
+                        this.texelViews = views;
+                    }
+                    Long cached = views.get(key);
                     long view;
                     if (cached != null) {
                         view = cached;
@@ -227,7 +234,7 @@ final class MetalRenderPass implements RenderPassBackend {
                         if (view == 0L) {
                             throw new IllegalStateException("Could not create a texel buffer view (" + format + ") for pipeline " + p.name());
                         }
-                        this.texelViews.put(key, view);
+                        views.put(key, view);
                     }
                     count = this.put(count, 1, b.textureIndex(i), view, 0L);
                 }

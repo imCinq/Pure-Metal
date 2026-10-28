@@ -210,6 +210,7 @@ final class MetalCommandEncoder implements CommandEncoderBackend {
         RenderPassDescriptor.@Nullable Attachment<OptionalDouble> depth = descriptor.depthAttachment();
         int width = 0;
         int height = 0;
+        RenderPass.RenderArea area = descriptor.renderArea();
         try (MemoryStack stack = MemoryStack.stackPush()) {
             int n = colors.size();
             LongBuffer textures = stack.callocLong(Math.max(n, 1));
@@ -224,7 +225,9 @@ final class MetalCommandEncoder implements CommandEncoderBackend {
                 MetalTextureView view = (MetalTextureView)attachment.textureView();
                 width = view.getWidth(0);
                 height = view.getHeight(0);
-                view.metalTexture().beforeWrite(attachment.clearValue().isPresent());
+                boolean fullOverwrite = attachment.clearValue().isPresent()
+                    && area.x() == 0 && area.y() == 0 && area.width() == width && area.height() == height;
+                view.metalTexture().beforeWrite(fullOverwrite);
                 textures.put(i, view.handle());
                 if (attachment.clearValue().isPresent()) {
                     Vector4fc c = attachment.clearValue().get();
@@ -251,7 +254,6 @@ final class MetalCommandEncoder implements CommandEncoderBackend {
                     clearDepth = depth.clearValue().getAsDouble();
                 }
             }
-            RenderPass.RenderArea area = descriptor.renderArea();
             long label = this.device.debugLabels() || io.github.imcinq.puremetal.bench.SubmissionProfile.ENABLED || io.github.imcinq.puremetal.bench.Bench.SECONDS > 0 ? MemoryUtil.memAddress(stack.UTF8Safe(descriptor.label().get())) : 0L;
             int ok = MetalNative.passBegin(
                 this.handle(), n, MemoryUtil.memAddress(textures), MemoryUtil.memAddress(loads), MemoryUtil.memAddress(clears),
