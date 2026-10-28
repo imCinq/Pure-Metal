@@ -34,6 +34,43 @@ public final class PureMetalMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(final String targetClassName, final String mixinClassName) {
+        if (mixinClassName.endsWith(".compat.DistantHorizonsApiMixin")) {
+            return io.github.imcinq.puremetal.backend.DistantHorizonsExperiment.enabled();
+        }
+        if (mixinClassName.endsWith(".perf.sodium.FluidDefaultContextMixin")) {
+            if (!SODIUM || Boolean.getBoolean("puremetal.disableFluidCallbacks")) return false;
+            boolean version = FabricLoader.getInstance().getModContainer("sodium")
+                .map(c -> c.getMetadata().getVersion().getFriendlyString())
+                .filter(io.github.imcinq.puremetal.perf.SodiumBlockCallbacks::supportsVersion).isPresent();
+            if (!version) return false;
+            try {
+                return io.github.imcinq.puremetal.perf.FabricFluidCallbacks.supportsOwner(
+                    MixinService.getService().getBytecodeProvider().getClassNode(targetClassName, false));
+            } catch (Exception unavailable) { return false; }
+        }
+        if (mixinClassName.endsWith(".perf.FabricFluidCallbacksMixin")) {
+            if (Boolean.getBoolean("puremetal.disableFluidCallbacks")) return false;
+            boolean version = FabricLoader.getInstance().getModContainer("fabric-rendering-fluids-v1")
+                .map(c -> c.getMetadata().getVersion().getFriendlyString())
+                .filter(io.github.imcinq.puremetal.perf.FabricFluidCallbacks::supportsVersion).isPresent();
+            if (!version) return false;
+            try {
+                return io.github.imcinq.puremetal.perf.FabricFluidCallbacks.supported(
+                    MixinService.getService().getBytecodeProvider().getClassNode(targetClassName, false));
+            } catch (Exception unavailable) { return false; }
+        }
+        if (mixinClassName.endsWith(".perf.sodium.BlockRendererCallbacksMixin")) {
+            if (!SODIUM || Boolean.getBoolean("puremetal.disableSodiumBlockCallbacks")) return false;
+            // Only inspected releases apply; the bytecode check below remains mandatory for each one.
+            boolean version = FabricLoader.getInstance().getModContainer("sodium")
+                .map(c -> c.getMetadata().getVersion().getFriendlyString())
+                .filter(io.github.imcinq.puremetal.perf.SodiumBlockCallbacks::supportsVersion).isPresent();
+            if (!version) return false;
+            try {
+                return io.github.imcinq.puremetal.perf.SodiumBlockCallbacks.supported(
+                    MixinService.getService().getBytecodeProvider().getClassNode(targetClassName, false));
+            } catch (Exception unavailable) { return false; }
+        }
         if (mixinClassName.contains(".memory.sodium.")) {
             return SODIUM && isSodiumMemoryTrimSupported(targetClassName);
         }
@@ -188,5 +225,13 @@ public final class PureMetalMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public void postApply(final String targetClassName, final ClassNode targetClass, final String mixinClassName, final IMixinInfo mixinInfo) {
+        if (mixinClassName.endsWith(".perf.FabricFluidCallbacksMixin")) {
+            boolean applied = io.github.imcinq.puremetal.perf.FabricFluidCallbacks.apply(targetClass);
+            LOGGER.info("Pure Metal: fluid scope carrier cache {}", applied ? "enabled" : "skipped (scope shape changed)");
+        }
+        if (mixinClassName.endsWith(".perf.sodium.BlockRendererCallbacksMixin")) {
+            boolean applied = io.github.imcinq.puremetal.perf.SodiumBlockCallbacks.apply(targetClass);
+            LOGGER.info("Pure Metal: Sodium block callback cache {}", applied ? "enabled" : "skipped (factory shape changed)");
+        }
     }
 }

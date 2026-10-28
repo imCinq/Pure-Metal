@@ -59,6 +59,7 @@ public final class PureMetalBackend implements GpuBackend {
         for (String id : ids) {
             var mod = loader.getModContainer(id);
             if (mod.isPresent()) {
+                if ("distanthorizons".equals(id) && DistantHorizonsExperiment.enabled()) continue;
                 return mod.get().getMetadata().getName() + " (" + id + ")";
             }
         }

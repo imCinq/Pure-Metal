@@ -1,5 +1,6 @@
 package io.github.imcinq.puremetal;
 
+import io.github.imcinq.puremetal.backend.DistantHorizonsExperiment;
 import io.github.imcinq.puremetal.backend.MetalInfo;
 import io.github.imcinq.puremetal.scale.RenderScale;
 import io.github.imcinq.puremetal.scale.ScaleConfig;
@@ -39,7 +40,8 @@ public final class DebugLine implements DebugScreenEntry {
         String now = MetalInfo.backend();
         if (now == null) {
             this.backend = null;
-            return INACTIVE;
+            String dh = DistantHorizonsExperiment.debugNote();
+            return dh == null ? INACTIVE : INACTIVE + " | " + dh;
         }
         String name = MetalInfo.gpuName();
         int percent = ScaleConfig.scale();
@@ -54,7 +56,8 @@ public final class DebugLine implements DebugScreenEntry {
                 case TEMPORAL -> "Temporal";
                 case BILINEAR -> "Bilinear";
             };
-            this.text = "Pure Metal: " + now + (name.isEmpty() ? "" : " | " + name) + " | " + scaler + " " + percent + "%";
+            String dh = DistantHorizonsExperiment.debugNote();
+            this.text = "Pure Metal: " + now + (name.isEmpty() ? "" : " | " + name) + " | " + scaler + " " + percent + "%" + (dh == null ? "" : " | " + dh);
         }
         return this.text;
     }
