@@ -26,5 +26,5 @@
   "puremetal.options.terrainLodRatio": "LOD Distance",
   "puremetal.options.terrainLodRatio.tooltip": "Share of Render Distance kept at full detail. Lower simplifies more terrain.",
   "puremetal.options.generationFpsCap": "Faster World Generation",
-  "puremetal.options.generationFpsCap.tooltip": "In singleplayer, while new terrain generates, limits FPS to twice your display's refresh rate (at most 259). The freed CPU time generates chunks faster. Normal FPS returns about 2 seconds after generation stops."
+  "puremetal.options.generationFpsCap.tooltip": "Loads new terrain faster in singleplayer.\n\nThe game draws frames and builds chunks on the same CPU. While chunks near you are still missing, FPS is limited to twice your refresh rate, so the CPU time saved goes to building chunks.\n\nNormal FPS returns once they have loaded."
 }
