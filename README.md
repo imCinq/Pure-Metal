@@ -5,6 +5,7 @@ A native Metal renderer for Minecraft on Apple Silicon Macs. Same visuals as van
 - Terrain LOD for extra FPS at long render distances
 - Optional Render Scale with temporal upscaling
 - Experimental Metal 4 mode (macOS 26+)
+- Experimental Distant Horizons support
 - A Pure Metal line on the F3 screen for bug reports
 
 ![Before and after](docs/gallery/1-before-after.webp)
@@ -14,7 +15,7 @@ A native Metal renderer for Minecraft on Apple Silicon Macs. Same visuals as van
 - macOS 14 or newer on Apple Silicon (tested on M2). The optional Metal 4 mode needs macOS 26.
 - Minecraft 26.3 with Fabric Loader 0.19+
 - Java 25
-- Sodium 0.9.2 (optional)
+- Sodium 0.9.2 or 0.9.3-beta.1 (optional)
 
 Iris and other shader mods are not supported.
 
@@ -28,6 +29,18 @@ Iris and other shader mods are not supported.
 ## Install
 
 Download the jar from the releases page and put it in your `mods` folder. Leave Graphics API on Default.
+
+## Distant Horizons
+
+**Distant Horizons** is experimental in **Pure Metal 0.4.1**. Use DH **3.3.4** and add this to your launcher's JVM arguments:
+
+```
+-Dpuremetal.experimentalDistantHorizons=true
+```
+
+Keep DH's rendering engine on **AUTO**. Distant terrain may take time to generate. Not supported with Iris. Remove the JVM argument and restart to turn it off.
+
+![Distant Horizons](docs/gallery/3-distant-horizons.webp)
 
 ## Build
 
