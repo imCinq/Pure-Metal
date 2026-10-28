@@ -50,6 +50,8 @@ public final class CoarseMesher {
     private final byte[] cellFaces = new byte[512];
     private final BlockPos.MutableBlockPos scratch = new BlockPos.MutableBlockPos();
     private final BlockPos.MutableBlockPos scratch2 = new BlockPos.MutableBlockPos();
+    // Kept separate from neighbor-query scratch: lighting needs the corner position throughout the call.
+    private final BlockPos.MutableBlockPos cornerPos = new BlockPos.MutableBlockPos();
     private final RandomSource random = RandomSource.create(0L);
     private final List<BlockStateModelPart> parts = new ObjectArrayList<>();
     private final BlockModelLighter lighter = new BlockModelLighter();
@@ -180,13 +182,13 @@ public final class CoarseMesher {
                         continue;
                     }
                     candidate = true;
+                    if (!this.cellModelsEligible(cx, cy, cz)) {
+                        continue;
+                    }
                     if (!coarse) {
                         // A full-detail build only needs to know a coarse build would differ.
                         this.result = TerrainLod.FULL;
                         return;
-                    }
-                    if (!this.cellModelsEligible(cx, cy, cz)) {
-                        continue;
                     }
                     this.cellFaces[(cy << 5) | (cz << 2) | (cx >> 1)] = (byte) faces;
                     for (int i = 0; i < 8; i++) {
@@ -237,6 +239,11 @@ public final class CoarseMesher {
             && s.getFluidState().isEmpty()
             && !s.hasOffsetFunction()
             && isVanillaModel(this.models.get(s));
+        // A fixed vanilla model cannot become mergeable at a different position. Reject it once
+        // per model set rather than testing eight copies in every exposed near/far cell.
+        if (ok && this.models.get(s).getClass() == SingleVariant.class) {
+            ok = this.modelEligible(s, BlockPos.ZERO);
+        }
         this.stateEligible.put(s, ok);
         return ok;
     }
@@ -316,8 +323,10 @@ public final class CoarseMesher {
             }
             for (Direction d : DIRECTIONS) {
                 boolean any = false;
-                for (BlockStateModelPart part : this.parts) {
-                    for (BakedQuad q : part.getQuads(d)) {
+                for (int partIndex = 0; partIndex < this.parts.size(); partIndex++) {
+                    List<BakedQuad> quads = this.parts.get(partIndex).getQuads(d);
+                    for (int quadIndex = 0; quadIndex < quads.size(); quadIndex++) {
+                        BakedQuad q = quads.get(quadIndex);
                         if (q.direction() != d || q.materialInfo().layer().translucent() || !isFullFace(q, d)) {
                             return false;
                         }
@@ -328,8 +337,8 @@ public final class CoarseMesher {
                     return false;
                 }
             }
-            for (BlockStateModelPart part : this.parts) {
-                if (!part.getQuads(null).isEmpty()) {
+            for (int partIndex = 0; partIndex < this.parts.size(); partIndex++) {
+                if (!this.parts.get(partIndex).getQuads(null).isEmpty()) {
                     return false;
                 }
             }
@@ -437,8 +446,10 @@ public final class CoarseMesher {
             List<BlockTintSource> tints = null;
             int tintIndexCached = -1;
             int tintCached = -1;
-            for (BlockStateModelPart part : this.parts) {
-                for (BakedQuad q : part.getQuads(d)) {
+            for (int partIndex = 0; partIndex < this.parts.size(); partIndex++) {
+                List<BakedQuad> quads = this.parts.get(partIndex).getQuads(d);
+                for (int quadIndex = 0; quadIndex < quads.size(); quadIndex++) {
+                    BakedQuad q = quads.get(quadIndex);
                     int tintIndex = q.materialInfo().tintIndex();
                     int tint = -1;
                     if (tintIndex != -1) {
@@ -469,12 +480,12 @@ public final class CoarseMesher {
     private void lightCorner(final int k, final Direction d, final int t1, final int t2) {
         int i = this.subIndex[k];
         BlockState state = this.states[i];
-        BlockPos pos = new BlockPos(this.ox + (i & 15), this.oy + (i >> 8), this.oz + ((i >> 4) & 15));
+        BlockPos pos = this.cornerPos.set(this.ox + (i & 15), this.oy + (i >> 8), this.oz + ((i >> 4) & 15));
         this.collectParts(state, pos);
         try {
             BakedQuad q = null;
-            for (BlockStateModelPart part : this.parts) {
-                List<BakedQuad> quads = part.getQuads(d);
+            for (int partIndex = 0; partIndex < this.parts.size(); partIndex++) {
+                List<BakedQuad> quads = this.parts.get(partIndex).getQuads(d);
                 if (!quads.isEmpty()) {
                     q = quads.getFirst();
                     break;

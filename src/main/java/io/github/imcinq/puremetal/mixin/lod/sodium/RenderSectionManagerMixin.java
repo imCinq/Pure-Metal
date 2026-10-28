@@ -1,6 +1,7 @@
 package io.github.imcinq.puremetal.mixin.lod.sodium;
 
 import io.github.imcinq.puremetal.lod.LodState;
+import io.github.imcinq.puremetal.lod.LodScanSchedule;
 import io.github.imcinq.puremetal.lod.TerrainLod;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import java.util.Iterator;
@@ -26,7 +27,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(value = RenderSectionManager.class, remap = false)
 public abstract class RenderSectionManagerMixin {
     @Unique private final ReferenceOpenHashSet<RenderSection> puremetal$lodSections = new ReferenceOpenHashSet<>();
-    @Unique private int puremetal$lodFrame;
+    @Unique private final LodScanSchedule puremetal$lodSchedule = new LodScanSchedule();
 
     @Shadow
     public abstract void scheduleRebuild(int x, int y, int z, boolean important);
@@ -42,6 +43,7 @@ public abstract class RenderSectionManagerMixin {
         lod.puremetal$setLodRequested(false);
         if (state != TerrainLod.NONE) {
             this.puremetal$lodSections.add(section);
+            this.puremetal$lodSchedule.meshArrived();
         } else {
             this.puremetal$lodSections.remove(section);
         }
@@ -50,11 +52,9 @@ public abstract class RenderSectionManagerMixin {
     @Inject(method = "prepareFrame", at = @At("TAIL"), require = 1)
     private void puremetal$lodTransitions(final Vector3dc camera, final CallbackInfo ci) {
         boolean moved = TerrainLod.update(camera.x(), camera.z());
-        // Checked when the camera chunk changes and every 20 frames (sections that finished building in between).
-        if (this.puremetal$lodSections.isEmpty() || (!moved && ++this.puremetal$lodFrame < 20)) {
-            return;
-        }
-        this.puremetal$lodFrame = 0;
+        // A fixed camera and unchanged meshes cannot acquire a new LOD mismatch. Completed builds
+        // re-arm the original periodic check; movement still checks immediately.
+        if (!this.puremetal$lodSchedule.shouldScan(moved, !this.puremetal$lodSections.isEmpty())) return;
         int requested = 0;
         Iterator<RenderSection> it = this.puremetal$lodSections.iterator();
         while (it.hasNext()) {
@@ -69,7 +69,7 @@ public abstract class RenderSectionManagerMixin {
                 this.scheduleRebuild(section.getChunkX(), section.getChunkY(), section.getChunkZ(), false);
                 if (++requested >= TerrainLod.MAX_REBUILDS_PER_FRAME) {
                     // Continue the remaining work next frame rather than waiting another 20 frames.
-                    this.puremetal$lodFrame = 20;
+                    this.puremetal$lodSchedule.continueNextFrame();
                     break;
                 }
             }

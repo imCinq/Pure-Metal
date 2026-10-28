@@ -296,6 +296,7 @@ public final class TestTerrainLod {
     }
 
     public static void main(String[] args) throws Exception {
+        checkLodSchedule();
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         policyChecks();
@@ -484,9 +485,43 @@ public final class TestTerrainLod {
         TerrainLod.setForTest(-14, 0, 13);
         Result mr = build(mod, models, set, colors, true);
         check(mr.coarse.isEmpty() && mr.state == TerrainLod.NONE, "custom/inset models stay full detail, state NONE");
+        TerrainLod.setForTest(0, 0, 13);
+        Result nearRejected = build(mod, models, set, colors, true);
+        check(nearRejected.coarse.isEmpty() && nearRejected.state == TerrainLod.NONE,
+            "near ineligible models do not request an unnecessary coarse rebuild");
+        check(nearRejected.faces.equals(fullFaces(mod, models)), "near model rejection preserves detailed faces");
+        World vines = new World();
+        for (int x = 0; x < 2; x++) for (int y = 0; y < 2; y++) for (int z = 0; z < 2; z++) {
+            vines.set(x, y, z, Blocks.VINE.defaultBlockState());
+        }
+        for (int camera : new int[]{0, -14}) {
+            TerrainLod.setForTest(camera, 0, 13);
+            Result vineResult = build(vines, models, set, colors, true);
+            check(vineResult.covered.isEmpty() && vineResult.state == TerrainLod.NONE,
+                "vines retain detailed geometry and do not enter solid-cell LOD");
+        }
 
         System.out.println(failures == 0 ? "ALL TERRAIN LOD CHECKS PASSED" : failures + " FAILURES");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    static void checkLodSchedule() {
+        var schedule = new io.github.imcinq.puremetal.lod.LodScanSchedule();
+        schedule.meshArrived();
+        check(schedule.shouldScan(true, true), "movement scans immediately");
+        int stationary = 0;
+        for (int i = 0; i < 1000; i++) if (schedule.shouldScan(false, true)) stationary++;
+        check(stationary == 0, "unchanged stationary meshes avoid 50 periodic scans");
+        for (int i = 0; i < 19; i++) check(!schedule.shouldScan(false, true), "idle periodic phase retained");
+        schedule.meshArrived();
+        check(schedule.shouldScan(false, true), "newly completed mesh uses existing periodic phase");
+        schedule.continueNextFrame();
+        check(schedule.shouldScan(false, true), "rebuild budget exhaustion continues next frame");
+        check(!schedule.shouldScan(false, true), "completed scan does not keep scanning");
+        check(schedule.shouldScan(true, true), "new camera policy rescans unchanged meshes immediately");
+        check(!schedule.shouldScan(true, false), "empty manager skips scans");
+        schedule.meshArrived();
+        check(schedule.shouldScan(true, true), "world/section arrival resumes scanning");
     }
 
     static int fullQuadCount(World w, Map<BlockState, BlockStateModel> models) {
